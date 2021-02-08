@@ -101,65 +101,24 @@ class ClientCertCNAuth():
         if headers.get('SSL_CLIENT_S_DN_CN', None) not in self.source:
             raise AuthenticationError(response_code=403)
 
-class JWTTokenAuth():
-    """Verifies JWT token with Authorizaton headers."""
+class JWTTokenAuth(BasicHTTPAuth):
+    """Verifies JWT token of Authorizaton headers."""
 
-    def __init__(self, src=None):
-        self.src = src
-
-    def authenticate(self, headers, target_host, target_port):
-        import base64
-        import jwt
-        import json
-
-        auth_header = headers.get('Authorization')
-        
-        if auth_header:
-            if not auth_header.startswith('Basic '):
-                self.auth_error()
-
-            try:
-                user_pass_raw = base64.b64decode(auth_header[6:])
-            except TypeError:
-                self.auth_error()
-
-            try:
-                # http://stackoverflow.com/questions/7242316/what-encoding-should-i-use-for-http-basic-authentication
-                user_pass_as_text = user_pass_raw.decode('ISO-8859-1')
-            except UnicodeDecodeError:
-                self.auth_error()
-
-            user_pass = user_pass_as_text.split(':', 1)
-            if len(user_pass) != 2:
-                self.auth_error()
-
-            try:
-                token, password = user_pass
-                kid = jwt.get_unverified_header(token).get('kid')
-                with open('/opt/websockify/websockify/jwks.json', 'r') as f:
-                    jwks = json.load(f)
-                jwk = [ _jwk for _jwk in jwks['keys'] if _jwk['kid'] == kid ][0]
-                public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
-                decoded = jwt.decode(token, public_key, algorithm='RS256')
-                username = decoded.get('sub', None)
-            except Exception:
-                self.auth_error()
-
-            if not self.validate_creds(username, password):
-                self.demand_auth()
-
-        else:
-            self.demand_auth()
-
-    def validate_creds(self, username, password):
-        if '%s:%s' % (username, password) == self.src:
-            return True
-        else:
+    def validate_creds(self, token, password):
+        try:
+            import base64
+            import jwt
+            import json
+            kid = jwt.get_unverified_header(token).get('kid')
+            with open('/opt/websockify/websockify/jwks.json', 'r') as f:
+                jwks = json.load(f)
+            jwk = [ _jwk for _jwk in jwks['keys'] if _jwk['kid'] == kid ][0]
+            public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+            decoded = jwt.decode(token, public_key, algorithm='RS256')
+            username = decoded.get('sub', None)
+            if '%s:%s' % (username, password) == self.src:
+                return True
+            else:
+                return False
+        except Exception:
             return False
-
-    def auth_error(self):
-        raise AuthenticationError(response_code=403)
-
-    def demand_auth(self):
-        raise AuthenticationError(response_code=401,
-                                  response_headers={'WWW-Authenticate': 'Basic realm="Websockify"'})
