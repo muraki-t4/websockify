@@ -100,3 +100,25 @@ class ClientCertCNAuth():
     def authenticate(self, headers, target_host, target_port):
         if headers.get('SSL_CLIENT_S_DN_CN', None) not in self.source:
             raise AuthenticationError(response_code=403)
+
+class JWTTokenAuth(BasicHTTPAuth):
+    """Verifies JWT token of Authorizaton headers."""
+
+    def validate_creds(self, token, password):
+        try:
+            import base64
+            import jwt
+            import json
+            kid = jwt.get_unverified_header(token).get('kid')
+            with open('/opt/websockify/websockify/jwks.json', 'r') as f:
+                jwks = json.load(f)
+            jwk = [ _jwk for _jwk in jwks['keys'] if _jwk['kid'] == kid ][0]
+            public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+            decoded = jwt.decode(token, public_key, algorithm='RS256')
+            username = decoded.get('sub', None)
+            if '%s:%s' % (username, password) == self.src:
+                return True
+            else:
+                return False
+        except Exception:
+            return False
